@@ -668,6 +668,14 @@ cast_to_subscriber(Pid, Msg) ->
 -spec maybe_delay_fetch_request(state()) -> state().
 maybe_delay_fetch_request(#state{sleep_timeout = T} = State) when T > 0 ->
   _ = erlang:send_after(T, self(), ?SEND_FETCH_REQUEST),
+
+  Ts = brod_utils:epoch_ms(),
+  error_logger:info_msg("[LAG_INFO_1] ~p ~p ~p: offset:~w [SLEEP] The sleep_timeout pause activated\n",
+                        [Ts,
+                         self(),
+                         State#state.partition,
+                         State#state.begin_offset]),
+
   State;
 maybe_delay_fetch_request(State) ->
   maybe_send_fetch_request(State).
@@ -713,6 +721,15 @@ send_fetch_request(#state{ begin_offset = BeginOffset
                              State#state.min_bytes,
                              State#state.max_bytes,
                              State#state.isolation_level),
+
+  % error_logger:info_msg("~p ~p ~p: offset:~w key:~s value:~s\n",
+  Ts = brod_utils:epoch_ms(),
+  error_logger:info_msg("[LAG_INFO_2] ~p ~p ~p: offset:~w\n",
+                        [Ts,
+                         self(),
+                         State#state.partition,
+                         State#state.begin_offset]),
+
   case kpro:request_async(Connection, Request) of
     ok ->
       State#state{last_req_ref = Request#kpro_req.ref};
