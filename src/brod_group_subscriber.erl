@@ -574,6 +574,11 @@ consume_ack(Pid, Offset) ->
 
 %% Send an async message to group coordinator for offset commit.
 do_commit_ack(Pid, GenerationId, Topic, Partition, Offset) ->
+
+  error_logger:info_msg("[LAG_INFO] do_commit_ack/5 #1 PID:~p Offset:~p\n",
+                      [self(),
+                       Offset]),
+
   ok = brod_group_coordinator:ack(Pid, GenerationId, Topic, Partition, Offset).
 
 subscribe_partitions(#state{ client    = Client

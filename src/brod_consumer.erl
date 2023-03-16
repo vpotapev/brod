@@ -392,6 +392,14 @@ handle_call(Call, _From, State) ->
 %% @private
 handle_cast({ack, Offset}, #state{pending_acks = PendingAcks} = State0) ->
   NewPendingAcks = handle_ack(PendingAcks, Offset),
+
+  error_logger:info_msg("[LAG_INFO] handle_cast({ack, ...}, ...) PID:~p PendingAcks.count:~p PendingAcks.bytes:~p NewPendingAcks.count:~p NewPendingAcks.bytes:~p\n",
+                      [self(),
+                      PendingAcks#pending_acks.count,
+                      PendingAcks#pending_acks.bytes,
+                      NewPendingAcks#pending_acks.count,
+                      NewPendingAcks#pending_acks.bytes]),
+
   State1 = State0#state{pending_acks = NewPendingAcks},
   State = maybe_send_fetch_request(State1),
   {noreply, State};
@@ -475,6 +483,12 @@ handle_batches(?undef, [], #state{} = State0) ->
   {noreply, State};
 handle_batches(_Header, ?incomplete_batch(Size),
                #state{max_bytes = MaxBytes} = State0) ->
+
+  error_logger:info_msg("[LAG_INFO] handle_batches/3 #1 PID:~p Size:~p MaxBytes:~p\n",
+                      [self(),
+                       Size,
+                       MaxBytes]),
+
   %% max_bytes is too small to fetch ONE complete batch
   true = Size > MaxBytes, %% assert
   State1 = State0#state{max_bytes = Size},
@@ -482,6 +496,11 @@ handle_batches(_Header, ?incomplete_batch(Size),
   {noreply, State};
 handle_batches(Header, [], #state{begin_offset = BeginOffset} = State0) ->
   StableOffset = brod_utils:get_stable_offset(Header),
+
+  error_logger:info_msg("[LAG_INFO] handle_batches/3 #2 PID:~p BeginOffset:~p\n",
+                      [self(),
+                       BeginOffset]),
+
   State =
     case BeginOffset < StableOffset of
       true ->
@@ -509,9 +528,19 @@ handle_batches(Header, Batches,
   {NewBeginOffset, Messages} =
     brod_utils:flatten_batches(BeginOffset, Header, Batches),
   State1 = State0#state{begin_offset = NewBeginOffset},
+
+  error_logger:info_msg("[LAG_INFO] handle_batches/3 #3.1 PID:~p BeginOffset:~p NewBeginOffset:~p\n",
+                      [self(),
+                       BeginOffset,
+                       NewBeginOffset]),
+
   State =
     case Messages =:= [] of
       true ->
+
+        error_logger:info_msg("[LAG_INFO] handle_batches/3 #3.2 PID:~p All messages are before requested offset, hence dropped\n",
+                            [self()]),
+
         %% All messages are before requested offset, hence dropped
         State1;
       false ->
@@ -523,6 +552,15 @@ handle_batches(Header, Batches,
         ok = cast_to_subscriber(Subscriber, MsgSet),
         NewPendingAcks = add_pending_acks(PendingAcks, Messages),
         State2 = State1#state{pending_acks = NewPendingAcks},
+
+        error_logger:info_msg("[LAG_INFO] handle_batches/3 #3.3 PID:~p StableOffset:~p PendingAcks.count:~p PendingAcks.bytes:~p NewPendingAcks.count:~p NewPendingAcks.bytes:~p\n",
+                            [self(),
+                            StableOffset,
+                            PendingAcks#pending_acks.count,
+                            PendingAcks#pending_acks.bytes,
+                            NewPendingAcks#pending_acks.count,
+                            NewPendingAcks#pending_acks.bytes]),
+
         maybe_shrink_max_bytes(State2, MsgSet#kafka_message_set.messages)
     end,
   {noreply, maybe_send_fetch_request(State)}.
@@ -669,11 +707,8 @@ cast_to_subscriber(Pid, Msg) ->
 maybe_delay_fetch_request(#state{sleep_timeout = T} = State) when T > 0 ->
   _ = erlang:send_after(T, self(), ?SEND_FETCH_REQUEST),
 
-  Ts = brod_utils:epoch_ms(),
-  error_logger:info_msg("[LAG_INFO_1] ~p ~p ~p: offset:~w [SLEEP] The sleep_timeout pause activated\n",
-                        [Ts,
-                         self(),
-                         State#state.partition,
+  error_logger:info_msg("[LAG_INFO] maybe_delay_fetch_request/1 PID:~p BeginOffset:~p\n",
+                        [self(),
                          State#state.begin_offset]),
 
   State;
@@ -700,6 +735,14 @@ maybe_send_fetch_request(#state{ pending_acks   = #pending_acks{ count = Count
                                , prefetch_count = PrefetchCount
                                , prefetch_bytes = PrefetchBytes
                                } = State) ->
+
+  error_logger:info_msg("[LAG_INFO] maybe_send_fetch_request/1 PID:~p Count:~p PrefetchCount:~p Bytes:~p PrefetchBytes:~p\n",
+                        [self(),
+                         Count,
+                         PrefetchCount,
+                         Bytes,
+                         PrefetchBytes]),
+
   %% Do not send fetch request if exceeded limits on both count and size
   case Count > PrefetchCount andalso Bytes > PrefetchBytes of
     true  -> State;
@@ -712,6 +755,11 @@ send_fetch_request(#state{ begin_offset = BeginOffset
                          } = State) ->
   (is_integer(BeginOffset) andalso BeginOffset >= 0) orelse
     erlang:error({bad_begin_offset, BeginOffset}),
+
+  error_logger:info_msg("[LAG_INFO] send_fetch_request/1 PID:~p BeginOffset:~p\n",
+                        [self(),
+                         BeginOffset]),
+
   Request =
     brod_kafka_request:fetch(Connection,
                              State#state.topic,
@@ -721,14 +769,6 @@ send_fetch_request(#state{ begin_offset = BeginOffset
                              State#state.min_bytes,
                              State#state.max_bytes,
                              State#state.isolation_level),
-
-  % error_logger:info_msg("~p ~p ~p: offset:~w key:~s value:~s\n",
-  Ts = brod_utils:epoch_ms(),
-  error_logger:info_msg("[LAG_INFO_2] ~p ~p ~p: offset:~w\n",
-                        [Ts,
-                         self(),
-                         State#state.partition,
-                         State#state.begin_offset]),
 
   case kpro:request_async(Connection, Request) of
     ok ->
