@@ -750,6 +750,12 @@ do_commit_offsets_(#state{ groupId                  = GroupId
           , {committed_offset, Offset + 1} %% +1 since roundrobin_v2 protocol
           , {committed_metadata, Metadata}
           ],
+
+          error_logger:info_msg("[LAG_INFO] do_commit_offsets_/1 PID:~p Partition:~p Offset:~p\n",
+                              [self(),
+                               Partition,
+                               Offset]),
+
         {Topic, PartitionOffset}
       end, AckedOffsets),
   TopicOffsets =
